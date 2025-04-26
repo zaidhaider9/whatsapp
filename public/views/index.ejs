@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Clone</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="profile-header">
+                <div class="profile-info">
+                    <img src="<%= user.profilePhoto %>" alt="Profile" class="profile-photo">
+                    <span class="profile-name"><%= user.name %></span>
+                </div>
+                <button class="edit-profile-btn" onclick="showEditProfile()">Edit Profile</button>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" placeholder="Search or start new chat">
+            </div>
+
+            <div class="online-users">
+                <h3>Online Users</h3>
+                <div id="onlineUsersList" class="online-users-list">
+                    <!-- Online users will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="chat-header">
+                <div class="chat-info">
+                    <img src="/images/default-avatar.png" alt="Chat" class="chat-avatar">
+                    <span class="chat-name">Select a chat</span>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+                <!-- Messages will be populated here -->
+            </div>
+
+            <div class="chat-input">
+                <input type="text" placeholder="Type a message" id="messageInput">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Profile Modal -->
+    <div id="editProfileModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Profile</h2>
+            <form id="profileForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="profilePhoto">Profile Photo</label>
+                    <input type="file" id="profilePhoto" name="photo" accept="image/*">
+                </div>
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" value="<%= user.name %>">
+                </div>
+                <button type="submit">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const currentUser = {
+            id: '<%= user._id %>',
+            name: '<%= user.name %>',
+            profilePhoto: '<%= user.profilePhoto %>'
+        };
+
+        // Set user ID on socket
+        socket.emit('set user', currentUser.id);
+
+        // Notify server that user is online
+        socket.emit('user online', currentUser.id);
+
+        let currentChatId = null;
+        let selectedUserId = null;
+
+        // Handle online users
+        socket.on('online users', (users) => {
+            console.log('Received online users:', users);
+            const onlineUsersList = document.getElementById('onlineUsersList');
+            onlineUsersList.innerHTML = users
+                .filter(user => user._id !== currentUser.id)
+                .map(user => `
+                    <div class="online-user ${selectedUserId === user._id ? 'selected' : ''}" data-user-id="${user._id}">
+                        <img src="${user.profilePhoto || '/images/default-avatar.png'}" alt="${user.name}" class="user-avatar" onerror="this.src='/images/default-avatar.png'">
+                        <span class="user-name">${user.name}</span>
+                        <div class="last-message"></div>
+                    </div>
+                `).join('');
+        });
+
+        // Handle chat list updates
+        socket.on('update chat list', (data) => {
+            console.log('Updating chat list:', data);
+            const { chatId, participants, lastMessage } = data;
+            
+            // Find the other participant
+            const otherParticipantId = participants.find(id => id !== currentUser.id);
+            if (!otherParticipantId) return;
+
+            // Find the user in online users list
+            const onlineUser = document.querySelector(`.online-user[data-user-id="${otherParticipantId}"]`);
+            if (onlineUser) {
+                // Update last message preview
+                const lastMessagePreview = onlineUser.querySelector('.last-message');
+                if (lastMessagePreview) {
+                    lastMessagePreview.textContent = lastMessage.content;
+                }
+            }
+        });
+
+        // Handle chat selection
+        function selectChat(userId) {
+            console.log('Selecting chat with user:', userId);
+            selectedUserId = userId;
+            
+            // Remove selected class from all users
+            document.querySelectorAll('.online-user').forEach(user => {
+                user.classList.remove('selected');
+            });
+            
+            // Add selected class to clicked user
+            const selectedUser = document.querySelector(`.online-user[data-user-id="${userId}"]`);
+            if (selectedUser) {
+                selectedUser.classList.add('selected');
+            }
+            
+            // Update chat header
+            const chatHeader = document.querySelector('.chat-info');
+            const userName = selectedUser.querySelector('.user-name').textContent;
+            const userAvatar = selectedUser.querySelector('.user-avatar').src;
+            
+            chatHeader.querySelector('.chat-name').textContent = userName;
+            chatHeader.querySelector('.chat-avatar').src = userAvatar;
+
+            // Enable chat input
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.querySelector('.chat-input button');
+            messageInput.disabled = false;
+            messageInput.placeholder = 'Type a message';
+            sendButton.disabled = false;
+            sendButton.style.opacity = '1';
+
+            // Get or create chat
+            socket.emit('get chat', { 
+                participants: [currentUser.id, userId]
+            });
+        }
+
+        // Initialize chat input state
+        function initializeChatInput() {
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.querySelector('.chat-input button');
+            messageInput.disabled = true;
+            messageInput.placeholder = 'Select a user to start chatting';
+            sendButton.disabled = true;
+            sendButton.style.opacity = '0.5';
+        }
+
+        // Call initialize on page load
+        initializeChatInput();
+
+        socket.on('chat found', (chat) => {
+            console.log('Chat found:', chat);
+            currentChatId = chat._id;
+            console.log('Current chat ID set to:', currentChatId);
+            
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = '';
+            
+            // Update chat header
+            const chatHeader = document.querySelector('.chat-info');
+            const selectedUser = Array.from(document.querySelectorAll('.online-user'))
+                .find(user => user.dataset.userId === selectedUserId);
+            
+            if (selectedUser) {
+                const userName = selectedUser.querySelector('.user-name').textContent;
+                const userAvatar = selectedUser.querySelector('.user-avatar').src;
+                
+                chatHeader.querySelector('.chat-name').textContent = userName;
+                chatHeader.querySelector('.chat-avatar').src = userAvatar;
+            }
+
+            // Load chat history
+            if (chat.messages && chat.messages.length > 0) {
+                console.log('Loading chat history:', chat.messages.length, 'messages');
+                chat.messages.forEach(message => {
+                    console.log('Message:', message);
+                    // Ensure message has sender info
+                    if (!message.sender) {
+                        message.sender = message.senderId || message.userId;
+                    }
+                    appendMessage(message);
+                });
+            }
+        });
+
+        function sendMessage() {
+            if (!selectedUserId) {
+                console.log('No user selected');
+                return;
+            }
+
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+            console.log('Sending message:', { content, currentChatId, selectedUserId });
+            
+            if (!content) {
+                console.log('Message is empty');
+                return;
+            }
+
+            // Create temporary message
+            const tempMessage = {
+                sender: currentUser.id,
+                content: content,
+                timestamp: new Date(),
+                chatId: currentChatId,
+                isTemp: true
+            };
+
+            // Show message immediately
+            appendMessage(tempMessage);
+            messageInput.value = '';
+
+            if (!currentChatId && selectedUserId) {
+                console.log('Creating new chat with user:', selectedUserId);
+                socket.emit('create chat', {
+                    participants: [currentUser.id, selectedUserId],
+                    content: content
+                });
+            } else if (currentChatId) {
+                console.log('Sending message to existing chat:', currentChatId);
+                socket.emit('chat message', { 
+                    chatId: currentChatId, 
+                    content: content 
+                });
+            }
+        }
+
+        // Handle chat creation
+        socket.on('chat created', (chat) => {
+            console.log('New chat created:', chat);
+            currentChatId = chat._id;
+            console.log('Current chat ID set to:', currentChatId);
+            
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+            
+            if (content) {
+                socket.emit('chat message', {
+                    chatId: currentChatId,
+                    content: content
+                });
+                messageInput.value = '';
+            }
+        });
+
+        function appendMessage(message) {
+            console.log('Appending message:', message);
+            const chatMessages = document.getElementById('chatMessages');
+            const messageElement = document.createElement('div');
+            
+            // Determine if message is sent by current user
+            const isSentByCurrentUser = message.sender === currentUser.id || 
+                                      message.sender._id === currentUser.id;
+            
+            messageElement.className = `message-container ${isSentByCurrentUser ? 'sent' : 'received'}`;
+            
+            const messageContent = document.createElement('div');
+            messageContent.className = `message ${message.isTemp ? 'temp' : ''}`;
+            
+            if (isSentByCurrentUser) {
+                messageContent.innerHTML = `
+                    <div class="message-time">${new Date(message.timestamp).toLocaleTimeString()}</div>
+                    <div class="message-content">${message.content}</div>
+                    ${message.isTemp ? '<div class="message-status">Sending...</div>' : ''}
+                `;
+            } else {
+                messageContent.innerHTML = `
+                    <div class="message-content">${message.content}</div>
+                    <div class="message-time">${new Date(message.timestamp).toLocaleTimeString()}</div>
+                `;
+            }
+            
+            messageElement.appendChild(messageContent);
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Update online user click handler
+        document.getElementById('onlineUsersList').addEventListener('click', (e) => {
+            const onlineUser = e.target.closest('.online-user');
+            if (onlineUser) {
+                const userId = onlineUser.dataset.userId;
+                selectChat(userId);
+            }
+        });
+
+        // Handle chat messages
+        socket.on('chat message', (message) => {
+            console.log('Received chat message:', message);
+            if (!message) {
+                console.error('Received empty message');
+                return;
+            }
+            
+            if (message.chatId === currentChatId) {
+                // Remove temp message if exists
+                const tempMessage = document.querySelector('.message.temp');
+                if (tempMessage) {
+                    tempMessage.closest('.message-container').remove();
+                }
+                appendMessage(message);
+            } else {
+                console.log('Message received for different chat:', message.chatId);
+            }
+        });
+
+        socket.on('error', (error) => {
+            console.error('Socket error:', error);
+            // Update temp message status
+            const tempMessage = document.querySelector('.message.temp');
+            if (tempMessage) {
+                tempMessage.querySelector('.message-status').textContent = 'Failed to send';
+                tempMessage.classList.add('error');
+            }
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+        });
+
+        // Add event listener for Enter key
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Add click event listener for send button
+        document.querySelector('.chat-input button').addEventListener('click', (e) => {
+            e.preventDefault();
+            sendMessage();
+        });
+
+        function showEditProfile() {
+            document.getElementById('editProfileModal').style.display = 'block';
+        }
+
+        // Handle profile form submission
+        document.getElementById('profileForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            
+            try {
+                // Update profile photo
+                if (formData.get('photo').size > 0) {
+                    const photoResponse = await fetch('/profile/photo', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const photoData = await photoResponse.json();
+                    if (photoData.success) {
+                        document.querySelector('.profile-photo').src = photoData.photo;
+                    }
+                }
+
+                // Update name
+                const nameResponse = await fetch('/profile/name', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name: formData.get('name') })
+                });
+                const nameData = await nameResponse.json();
+                if (nameData.success) {
+                    document.querySelector('.profile-name').textContent = nameData.name;
+                }
+
+                document.getElementById('editProfileModal').style.display = 'none';
+            } catch (error) {
+                console.error('Error updating profile:', error);
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,15 @@
+# MongoDB Configuration
+MONGODB_URI=mongodb://mongodb:27017/chat-app
+MONGODB_USERNAME=
+MONGODB_PASSWORD=
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# Session Configuration
+SESSION_SECRET=987654
+
+# JWT Configuration (if using JWT for authentication)
+JWT_SECRET=jdshfjdsbvjhdbvjwy8372y4
+JWT_EXPIRES_IN=24h

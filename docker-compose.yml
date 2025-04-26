@@ -1,0 +1,28 @@
+version: '3'
+services:
+  chat-app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/chat-app
+      - SESSION_SECRET=your-secret-key-here
+    depends_on:
+      - mongodb
+    command: sh -c "npm install && npm run dev"
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+volumes:
+  mongodb_data: 
